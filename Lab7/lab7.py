@@ -9,7 +9,7 @@ import packet_in
 # Device info
 device_info = {
     "controller_vm": {"host": "10.224.78.63", "username": "sdn", "password": "sdn123"},
-    "mininet_vm": {"host": "10.224.79.89", "username": "mininet", "password": "mininet"}
+    "mininet_vm": {"host": "10.224.79.89", "username": "mininet", "password": "sdn123"}
 }
 
 
@@ -73,6 +73,7 @@ def run_pingall(mininet_ip, mn_cfg):
 
 def main():
     mn_cfg = device_info['mininet_vm']
+    mininet_ip = mn_cfg['host']
     # Wait for s1 to come up
     if not wait_for_bridge(mininet_ip, mn_cfg):
         print("Exiting: s1 not found")
@@ -82,8 +83,10 @@ def main():
     if "tcp:10" in ctrl_out:
         print(f"Controller found")
         parts = ctrl_out.split(":")
-        ip = parts[1]
-        port = int(parts[2])
+        ip = parts[2]
+        port = int(parts[3])
+        print(f"ip is {ip}")
+        print(f"port is {port}")
         packet_in.send_packet_in(ip, port)
     else:
         print("Controller not found")

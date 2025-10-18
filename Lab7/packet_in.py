@@ -26,7 +26,7 @@ def send_packet_in(controller_ip, controller_port):
     # controller_port = 6653
     s = socket.socket()
     s.connect((controller_ip, controller_port))
-    for i in range(10):
+    for i in range(10000):
         msg = build_packet_in()
         s.sendall(msg)
         
