@@ -20,10 +20,10 @@ def build_packet_in(controller_ip="10.224.78.63", controller_port=6653, source_i
     msg = of_hdr + payload
     return msg
 
-def send_packet_in():
+def send_packet_in(controller_ip, controller_port):
     # Send it
-    controller_ip = "10.224.78.63"
-    controller_port = 6653
+    # controller_ip = "10.224.78.63"
+    # controller_port = 6653
     s = socket.socket()
     s.connect((controller_ip, controller_port))
     for i in range(10):

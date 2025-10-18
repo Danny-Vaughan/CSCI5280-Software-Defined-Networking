@@ -2,8 +2,8 @@
 
 import re
 import time
-from netmiko import ConnectHandler
 import paramiko
+import packet_in
 
 
 # Device info
@@ -83,7 +83,8 @@ def main():
         print(f"Controller found")
         parts = ctrl_out.split(":")
         ip = parts[1]
-        port = parts[2]
+        port = int(parts[2])
+        packet_in.send_packet_in(ip, port)
     else:
         print("Controller not found")
 
