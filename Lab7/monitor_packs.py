@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import time
+import threading
 import subprocess
 from collections import defaultdict
 
@@ -10,34 +12,40 @@ blocked_ips = set()
 
 def add_firewall_rule(ip):
 
-    print(f"Limit reached: {ip} -> Blocking with iptables")
+    print("Limit reached: {} -> Blocking with iptables".format(ip))
     try:
         subprocess.run(
             ["sudo", "iptables", "-I", "INPUT", "-s", ip, "-j", "DROP"],
             check=True,
         )
         blocked_ips.add(ip)
-        print(f"Successfully blocked {ip}")
+        print("Successfully blocked {}".format(ip))
     except subprocess.CalledProcessError as e:
-        print(f"Failed to add iptables rule for {ip}: {e}")
+        print("Failed to add iptables rule for {}: {}".format(ip, e))
 
 def process_packet(src_ip):
 
     if src_ip in blocked_ips:
         return
+    if src_ip != "10.224.78.63":
+        packet_in_counts[src_ip] += 1
+        count = packet_in_counts[src_ip]
+        print("{}: {} packet_ins".format(src_ip, count))
 
-    packet_in_counts[src_ip] += 1
-    count = packet_in_counts[src_ip]
+        if count >= limit:
+            add_firewall_rule(src_ip)
 
-    print(f"{src_ip}: {count} packet_ins")
+def packet_reset(interval=30):
+    while True:
+        time.sleep(interval)
+        packet_in_counts.clear()
+        print("Reset packet_in_count")
 
-    if count >= limit:
-        add_firewall_rule(src_ip)
 
 def monitor_packet_ins():
 
     cmd = ["sudo", "tcpdump", "-l", "-n", "tcp port 6653"]
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True)
     print("Monitoring PACKET_IN traffic on TCP 6653")
 
     try:
@@ -57,4 +65,6 @@ def monitor_packet_ins():
         process.terminate()
 
 if __name__ == "__main__":
+    reset_thread = threading.Thread(target=packet_reset, daemon=True)
+    reset_thread.start()
     monitor_packet_ins()

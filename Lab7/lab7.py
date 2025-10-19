@@ -41,36 +41,6 @@ def wait_for_bridge(mininet_ip, mn_cfg, switch="s1", timeout=30):
     return False
 
 
-def verify_openflow(mininet_ip, mn_cfg):
-    # Verify OpenFlow connectivity
-    print("Verifying OpenFlow connectivity...")
-    show1 = paramiko_send_command(mininet_ip, mn_cfg['username'], mn_cfg['password'], "sudo ovs-vsctl show")
-    show2 = paramiko_send_command(mininet_ip, mn_cfg['username'], mn_cfg['password'], "sudo ovs-vsctl get-controller s1")
-    show3 = paramiko_send_command(mininet_ip, mn_cfg['username'], mn_cfg['password'], "sudo ovs-ofctl -O OpenFlow13 show s1")
-    print(show1)
-    print(show2)
-    print(show3)
-
-def run_pingall(mininet_ip, mn_cfg):
-    # Run pingall in the existing Mininet screen session
-    print("Running pingall in Mininet session...")
-
-    # Send pingall command into screen
-    cmd = 'sudo screen -S mininet -X stuff "pingall\n"'
-    paramiko_send_command(mininet_ip, mn_cfg['username'], mn_cfg['password'], cmd)
-    time.sleep(8)
-
-    # Read and print the screen content
-    dump_cmd = 'sudo screen -S mininet -X hardcopy /tmp/mininet_dump.txt'
-    paramiko_send_command(mininet_ip, mn_cfg['username'], mn_cfg['password'], dump_cmd)
-    output = paramiko_send_command(mininet_ip, mn_cfg['username'], mn_cfg['password'], 'cat /tmp/mininet_dump.txt')
-    print(output)
-
-
-
-
-
-
 def main():
     mn_cfg = device_info['mininet_vm']
     mininet_ip = mn_cfg['host']
@@ -90,8 +60,6 @@ def main():
         packet_in.send_packet_in(ip, port)
     else:
         print("Controller not found")
-
-    
 
 
 if __name__ == "__main__":
