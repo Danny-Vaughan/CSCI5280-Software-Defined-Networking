@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Firewall Rules</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<div class="container mt-5">
+    <h2>Firewall - Add Rule</h2>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} mt-2">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    
+    <form method="post">
+        <div class="mb-3">
+            <label>DPID</label>
+            <input type="text" class="form-control" name="dpid" required>
+        </div>
+        <div class="mb-3">
+            <label>Priority</label>
+            <input type="number" class="form-control" name="priority" required>
+        </div>
+        <div class="mb-3">
+            <label>In-Port</label>
+            <input type="text" class="form-control" name="in_port" required>
+        </div>
+        <div class="mb-3">
+            <label>Eth-type</label>
+            <input type="text" class="form-control" name="eth_type" required>
+        </div>
+        <div class="mb-3">
+            <label>Src IP</label>
+            <input type="text" class="form-control" name="src_ip" required>
+        </div>
+        <div class="mb-3">
+            <label>Dest IP</label>
+            <input type="text" class="form-control" name="dest_ip" required>
+        </div>
+        <div class="mb-3">
+            <label>L4 Protocol (TCP/UDP)</label>
+            <input type="text" class="form-control" name="l4_proto" required>
+        </div>
+        <div class="mb-3">
+            <label>Action (port/flood)</label>
+            <input type="text" class="form-control" name="action" required>
+        </div>
+        <button type="submit" class="btn btn-danger">Add Firewall Rule</button>
+    </form>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary mt-3">Back</a>
+</div>
+</body>
+</html>
