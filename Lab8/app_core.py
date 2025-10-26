@@ -29,7 +29,6 @@ server_ipv6_address = "2::2"
 http_port = 8080
 
 
-
 def push_static_flows(device, selector, treatment, priority=100, comment=""):
     body = {
         "priority": priority,
