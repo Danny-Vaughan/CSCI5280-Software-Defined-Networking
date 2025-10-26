@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+  <head>
+    <meta charset="UTF-8">
+    <title>ONOS Path Control App</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  </head>
+  <body class="bg-dark text-light">
+    <div class="container py-4">
+      <h1 class="mb-4">ONOS SDN Path Control Dashboard</h1>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, msg in messages %}
+            <div class="alert alert-{{ category }}">{{ msg }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      <div class="card bg-secondary mb-4">
+        <div class="card-body">
+          <h5 class="card-title">Available Path Modes</h5>
+          <form method="post" action="/default" class="d-inline">
+            <button class="btn btn-outline-light me-2">Default Path</button>
+          </form>
+          <form method="post" action="/shortest" class="d-inline">
+            <button class="btn btn-primary me-2">Shortest Path</button>
+          </form>
+          <form method="post" action="/longest" class="d-inline">
+            <button class="btn btn-warning me-2">Longest Path</button>
+          </form>
+          <form method="post" action="/bestdelay" class="d-inline">
+            <button class="btn btn-success">Best Delay Path</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card bg-secondary">
+        <div class="card-body">
+          <h5>Instructions</h5>
+          <ul>
+            <li><b>Default:</b> All traffic through OvS6–OvS7–OvS5</li>
+            <li><b>Shortest:</b> HTTP via OvS8–OvS5</li>
+            <li><b>Longest:</b> HTTP via OvS2–OvS3–OvS4–OvS5</li>
+            <li><b>Best Delay:</b> HTTP returns to OvS6–OvS7–OvS5 (simulate link delay manually)</li>
+          </ul>
+          <p>ICMP (ping) traffic always follows the default path.</p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
+
