@@ -1,27 +1,17 @@
 #!/usr/bin/env python3
-"""
-Ryu SDN app: DNS Firewall with site-checker and fake reply injection
-Author: Danny Vaughan (CSCI SDN Lab)
-
-Behavior:
-- Intercepts DNS queries from any host.
-- For each domain:
-    * Query local Flask checker (http://127.0.0.1:8080/check/<domain>)
-    * If "bad"  -> Send fake DNS reply mapping to 10.0.0.254 ("blocked site")
-    * If "good" -> Forward DNS query to 8.8.8.8, return real reply.
-    * If "unknown" -> Forward to 8.8.8.8 and allow.
-"""
 
 from ryu.base import app_manager
 from ryu.controller import ofp_event
 from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, set_ev_cls
 from ryu.ofproto import ofproto_v1_3
-from ryu.lib.packet import packet, ethernet, ipv4, udp, dns
+from ryu.lib.packet import packet, ethernet, ipv4, udp
 import requests, socket
+from scapy.all import DNS, DNSQR, DNSRR, Ether, IP, UDP, sr1
 
-CHECKER_URL = "http://127.0.0.1:8080/check/"  # Flask checker
-REAL_DNS = "8.8.8.8"                           # real resolver
-BLOCK_IP = "10.0.0.254"                        # your "blocked site" page
+CHECKER_URL = "http://127.0.0.1:8181/check/"
+REAL_DNS = "1.1.1.1"
+BLOCK_IP = "10.10.10.1"
+
 
 class DNSFirewall(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -30,164 +20,117 @@ class DNSFirewall(app_manager.RyuApp):
         super(DNSFirewall, self).__init__(*args, **kwargs)
         self.domain_cache = {}
 
-    # -------------------- Default Rules --------------------
+    # ---------------- DEFAULT RULES -----------------
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
         dp = ev.msg.datapath
         parser = dp.ofproto_parser
         ofp = dp.ofproto
 
-        # DNS packets → controller
+        # Send UDP/53 to controller
         match = parser.OFPMatch(eth_type=0x0800, ip_proto=17, udp_dst=53)
-        actions = [parser.OFPActionOutput(ofp.OFPP_CONTROLLER, ofp.OFPCML_NO_BUFFER)]
+        actions = [parser.OFPActionOutput(ofp.OFPP_CONTROLLER,
+                                          ofp.OFPCML_NO_BUFFER)]
         inst = [parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, actions)]
-        dp.send_msg(parser.OFPFlowMod(datapath=dp, priority=100, match=match, instructions=inst))
 
-        self.logger.info("Default rule installed: send UDP/53 to controller")
+        dp.send_msg(parser.OFPFlowMod(
+            datapath=dp, priority=100, match=match,
+            instructions=inst
+        ))
 
-    # -------------------- Packet Handling --------------------
+        self.logger.info("Installed DNS → controller rule")
+
+    # ---------------- PACKET IN -----------------
+
+    def dns_responder(self, pkt, ip):
+    # Check if the packet is a DNS query and has no answers yet
+        if (DNS in pkt and pkt[DNS].opcode == 0 and pkt[DNS].ancount == 0):
+            spoofed_response = Ether(dst=pkt[Ether].src, src=pkt[Ether].dst)/IP(dst=pkt[IP].src, src=pkt[IP].dst)/ \
+                           UDP(dport=pkt[UDP].sport, sport=53)/ \
+                           DNS(id=pkt[DNS].id, qr=1, aa=1, rd=1, ra=1,
+                               qd=pkt[DNS].qd,
+                               an=DNSRR(rrname=pkt[DNSQR].qname, ttl=10, rdata=ip))
+
+            return spoofed_response
+        return None
+
+
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def packet_in_handler(self, ev):
+
         msg = ev.msg
         dp = msg.datapath
-        pkt = packet.Packet(msg.data)
-        eth_pkt = pkt.get_protocol(ethernet.ethernet)
-        ip_pkt = pkt.get_protocol(ipv4.ipv4)
+        ofp = dp.ofproto
+        parser = dp.ofproto_parser
+
+        raw = msg.data
+        pkt = packet.Packet(raw)
+        ether_pkt = Ether(raw)
+        eth = pkt.get_protocol(ethernet.ethernet)
+        ip = pkt.get_protocol(ipv4.ipv4)
         udp_pkt = pkt.get_protocol(udp.udp)
-        dns_pkt = pkt.get_protocol(dns.dns)
 
-        if not dns_pkt or dns_pkt.qr != 0:
-            return  # Only process DNS queries
-
-        qname = dns_pkt.qd.name.lower() if dns_pkt.qd else None
-        if not qname:
+        if not (ip and udp_pkt and udp_pkt.dst_port == 53):
             return
 
-        in_port = msg.match["in_port"]
-        self.logger.info(f"DNS Query intercepted: {qname}")
+        try:
+            sc = ether_pkt[DNS]
+            if not sc.qd.qname.decode('utf-8'):
+                return  # not a query
+            qname =  sc.qd.qname.decode('utf-8').rstrip('.')
+        except Exception as e:
+            self.logger.error("Scapy failed DNS parse: %s", e)
+            return
 
-        # -------------------- Site Checker --------------------
-        result = self.domain_cache.get(qname)
-        if not result:
+        self.logger.info(f"DNS Query Intercepted via Scapy: {qname}")
+
+        # ---------------- SITE CHECKER -----------------
+        if qname not in self.domain_cache:
             try:
                 r = requests.get(CHECKER_URL + qname)
                 result = r.json().get("result", "unknown")
-                self.domain_cache[qname] = result
-            except Exception as e:
-                self.logger.error(f"Checker request failed: {e}")
+            except:
                 result = "unknown"
+            self.domain_cache[qname] = result
 
-        self.logger.info(f"Domain {qname} classified as {result}")
+        result = self.domain_cache[qname]
+        self.logger.info(f"DNS classifier: {qname} → {result}")
 
-        # -------------------- Decision --------------------
+        # ---------------- DECISION -----------------
         if result == "bad":
-            self.logger.info(f"Sending fake reply for blocked domain: {qname}")
-            self.send_fake_dns_reply(dp, in_port, eth_pkt.src, eth_pkt.dst,
-                                     ip_pkt.dst, ip_pkt.src, dns_pkt, BLOCK_IP)
+            self.logger.info(f"Sending FAKE reply for: {qname}")
+            payload = self.dns_responder(ether_pkt, BLOCK_IP)
+            self.send_dns_reply(dp, payload)
             return
 
-        # Otherwise query real DNS and forward result
-        real_ip = self.query_real_dns(pkt)
+        # Otherwise forward to real DNS
+        real_ip = self.query_real_dns(sc)
         if real_ip:
-            self.logger.info(f"{qname} resolved via 8.8.8.8 → {real_ip}")
-            self.send_real_dns_reply(dp, in_port, eth_pkt.src, eth_pkt.dst,
-                                     ip_pkt.dst, ip_pkt.src, dns_pkt, real_ip)
+            self.logger.info(f"Real DNS: {qname} → {real_ip}")
+            payload = self.dns_responder(ether_pkt, real_ip)
+            self.send_dns_reply(dp, payload)
         else:
-            self.logger.warning(f"Could not resolve {qname} via 8.8.8.8")
+            self.logger.warning(f"Real DNS lookup failed for {qname}")
 
-    # -------------------- DNS Forwarding --------------------
-    def query_real_dns(self, pkt):
-        """Send real DNS query to 8.8.8.8 and parse reply."""
-        try:
-            raw_dns = pkt.protocols[-1].to_bytes()
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.settimeout(3)
-            sock.sendto(raw_dns, (REAL_DNS, 53))
-            data, _ = sock.recvfrom(4096)
-            sock.close()
+    # ---------------- REAL DNS FORWARD -----------------
+    def query_real_dns(self, scapy_query):
+        #try:
+        ip_address = socket.gethostbyname(scapy_query.qd.qname.decode('utf-8').rstrip('.'))
+        return ip_address
 
-            p = packet.Packet(data)
-            dns_reply = p.get_protocol(dns.dns)
-            if dns_reply and dns_reply.an:
-                for ans in dns_reply.an:
-                    if ans.type == dns.DNS_A:
-                        return ans.rdata
-        except Exception as e:
-            self.logger.error(f"DNS forward error: {e}")
-        return None
-
-    # -------------------- Fake DNS Reply --------------------
-    def send_fake_dns_reply(self, dp, in_port, eth_src, eth_dst, ip_src, ip_dst, dns_query, blocked_ip):
+    
+    # ---------------- DNS REPLY (FAKE or REAL) -----------------
+    def send_dns_reply(self, dp, payload):
         parser = dp.ofproto_parser
         ofp = dp.ofproto
+        payload_bytes=bytes(payload)
+        actions = [parser.OFPActionOutput(1)]
 
-        answer = dns.dns.answer(
-            name=dns_query.qd.name,
-            type=dns.DNS_A,
-            cls=1,
-            ttl=60,
-            rdlen=4,
-            rdata=blocked_ip
+        out = parser.OFPPacketOut(
+            datapath=dp,
+            buffer_id=ofp.OFP_NO_BUFFER,
+            in_port=ofp.OFPP_CONTROLLER,
+            actions=actions,
+            data=payload_bytes
         )
-
-        dns_reply = dns.dns(
-            id=dns_query.id,
-            qr=1, aa=1, rd=1, ra=1,
-            qd=dns_query.qd,
-            an=[answer]
-        )
-
-        udp_reply = udp.udp(src_port=53, dst_port=udp.udp.SRC_PORT)
-        ip_reply = ipv4.ipv4(proto=17, src=ip_src, dst=ip_dst)
-        eth_reply = ethernet.ethernet(dst=eth_src, src=eth_dst, ethertype=0x0800)
-
-        pkt_out = packet.Packet()
-        pkt_out.add_protocol(eth_reply)
-        pkt_out.add_protocol(ip_reply)
-        pkt_out.add_protocol(udp_reply)
-        pkt_out.add_protocol(dns_reply)
-        pkt_out.serialize()
-
-        actions = [parser.OFPActionOutput(in_port)]
-        out = parser.OFPPacketOut(datapath=dp, buffer_id=ofp.OFP_NO_BUFFER,
-                                  in_port=ofp.OFPP_CONTROLLER,
-                                  actions=actions, data=pkt_out.data)
-        dp.send_msg(out)
-
-    # -------------------- Real DNS Reply Forward --------------------
-    def send_real_dns_reply(self, dp, in_port, eth_src, eth_dst, ip_src, ip_dst, dns_query, real_ip):
-        parser = dp.ofproto_parser
-        ofp = dp.ofproto
-
-        answer = dns.dns.answer(
-            name=dns_query.qd.name,
-            type=dns.DNS_A,
-            cls=1,
-            ttl=300,
-            rdlen=4,
-            rdata=real_ip
-        )
-
-        dns_reply = dns.dns(
-            id=dns_query.id,
-            qr=1, aa=1, rd=1, ra=1,
-            qd=dns_query.qd,
-            an=[answer]
-        )
-
-        udp_reply = udp.udp(src_port=53, dst_port=udp.udp.SRC_PORT)
-        ip_reply = ipv4.ipv4(proto=17, src=ip_src, dst=ip_dst)
-        eth_reply = ethernet.ethernet(dst=eth_src, src=eth_dst, ethertype=0x0800)
-
-        pkt_out = packet.Packet()
-        pkt_out.add_protocol(eth_reply)
-        pkt_out.add_protocol(ip_reply)
-        pkt_out.add_protocol(udp_reply)
-        pkt_out.add_protocol(dns_reply)
-        pkt_out.serialize()
-
-        actions = [parser.OFPActionOutput(in_port)]
-        out = parser.OFPPacketOut(datapath=dp, buffer_id=ofp.OFP_NO_BUFFER,
-                                  in_port=ofp.OFPP_CONTROLLER,
-                                  actions=actions, data=pkt_out.data)
         dp.send_msg(out)

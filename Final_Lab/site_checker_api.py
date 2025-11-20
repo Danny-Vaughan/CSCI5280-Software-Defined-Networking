@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
 Flask-based API for DNS Firewall.
-Run on controller (localhost:8080).
+Run on controller (localhost:5004).
 Keeps track of blacklisted domains for dynamic blocking.
 
 Usage:
     python3 site_checker_api.py
 Then from a browser or curl:
-    curl http://127.0.0.1:8080/check/openai.com
-    curl -X POST http://127.0.0.1:8080/blacklist -H "Content-Type: application/json" -d '{"domain": "facebook.com"}'
+    curl http://127.0.0.1:5004/check/openai.com
+    curl -X POST http://127.0.0.1:5004/blacklist -H "Content-Type: application/json" -d '{"domain": "facebook.com"}'
 """
 
 from flask import Flask, request, jsonify
@@ -90,4 +90,4 @@ def index():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=5004)
